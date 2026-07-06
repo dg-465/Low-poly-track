@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyTrack Mini-Clone</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; font-size: 20px; pointer-events: none; }
+        #instructions { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.7); font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">Speed: <span id="speed">0</span> km/h</div>
+    <div id="instructions">Use ARROW KEYS or WASD to drive. Spacebar to drift/brake.</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 1. SETUP SCENE, CAMERA, & RENDERER ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdce6ed); // Poly style light sky
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. LIGHTS ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 150, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- 3. CREATE TRACK (Low-Poly Style) ---
+        const trackMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+        const borderMaterial = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+        
+        // Simple straight track piece
+        const trackGeometry = new THREE.BoxGeometry(40, 1, 300);
+        const track = new THREE.Mesh(trackGeometry, trackMaterial);
+        track.position.set(0, -0.5, 0);
+        track.receiveShadow = true;
+        scene.add(track);
+
+        // Red borders
+        const leftBorder = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 300), borderMaterial);
+        leftBorder.position.set(-20, 0, 0);
+        const rightBorder = leftBorder.clone();
+        rightBorder.position.x = 20;
+        scene.add(leftBorder, rightBorder);
+
+        // --- 4. CREATE CAR ---
+        const carGroup = new THREE.Group();
+        
+        // Car Body
+        const bodyGeom = new THREE.BoxGeometry(3, 1, 5);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.2 });
+        const carBody = new THREE.Mesh(bodyGeom, bodyMat);
+        carBody.position.y = 0.6;
+        carBody.castShadow = true;
+        carGroup.add(carBody);
+
+        // Wheels
+        const wheelGeom = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12);
+        wheelGeom.rotateZ(Math.PI / 2);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        
+        const wheels = [
+            new THREE.Mesh(wheelGeom, wheelMat), // Front Left
+            new THREE.Mesh(wheelGeom, wheelMat), // Front Right
+            new THREE.Mesh(wheelGeom, wheelMat), // Back Left
+            new THREE.Mesh(wheelGeom, wheelMat)  // Back Right
+        ];
+
+        wheels[0].position.set(-1.6, 0.5, 1.8);
+        wheels[1].position.set(1.6, 0.5, 1.8);
+        wheels[2].position.set(-1.6, 0.5, -1.8);
+        wheels[3].position.set(1.6, 0.5, -1.8);
+
+        wheels.forEach(w => carGroup.add(w));
+        scene.add(carGroup);
+
+        // --- 5. KEYBOARD CONTROLS ---
+        const keys = { w: false, a: false, s: false, d: false, Shift: false };
+        
+        window.addEventListener('keydown', (e) => handleKey(e, true));
+        window.addEventListener('keyup', (e) => handleKey(e, false));
+
+        function handleKey(e, isDown) {
+            let key = e.key.toLowerCase();
+            if (key === 'arrowup') key = 'w';
+            if (key === 'arrowdown') key = 's';
+            if (key === 'arrowleft') key = 'a';
+            if (key === 'arrowright') key = 'd';
+            if (e.key === ' ') key = 'shift';
+            
+            if (key in keys) keys[key] = isDown;
+        }
+
+        // --- 6. PHYSICS & MOVEMENT VARIABLES ---
+        let speed = 0;
+        const maxSpeed = 2.5;
+        const acceleration = 0.05;
+        const friction = 0.02;
+        const brakeDecel = 0.1;
+        let carRotation = 0;
+        const turnSpeed = 0.04;
+
+        // --- 7. GAME LOOP ---
+        const speedDisplay = document.getElementById('speed');
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Handle Acceleration / Braking
+            if (keys.w) {
+                speed = Math.min(speed + acceleration, maxSpeed);
+            } else if (keys.s) {
+                speed = Math.max(speed - brakeDecel, -maxSpeed/2);
+            } else {
+                // Friction slowdown
+                if (speed > 0) speed = Math.max(0, speed - friction);
+                if (speed < 0) speed = Math.min(0, speed + friction);
+            }
+
+            if (keys.shift) {
+                speed = speed * 0.9; // Handbrake
+            }
+
+            // Handle Turning (Only if moving)
+            if (Math.abs(speed) > 0.1) {
+                const reverseMultiplier = speed > 0 ? 1 : -1;
+                if (keys.a) carRotation += turnSpeed * reverseMultiplier * (speed / maxSpeed);
+                if (keys.d) carRotation -= turnSpeed * reverseMultiplier * (speed / maxSpeed);
+                
+                // Visual wheel turning
+                wheels[0].rotation.y = keys.a ? 0.3 : (keys.d ? -0.3 : 0);
+                wheels[1].rotation.y = wheels[0].rotation.y;
+            }
+
+            // Update Car Position based on angle
+            carGroup.rotation.y = carRotation;
+            carGroup.position.x += Math.sin(carRotation) * speed;
+            carGroup.position.z += Math.cos(carRotation) * speed;
+
+            // Spin wheels based on speed
+            wheels.forEach(w => w.rotation.x += speed * 0.5);
+
+            // 3rd Person Camera Follow
+            const cameraOffset = new THREE.Vector3(0, 5, -15); // Behind and above
+            const backOfCar = cameraOffset.applyMatrix4(carGroup.matrixWorld);
+            camera.position.lerp(backOfCar, 0.1); // Smooth camera tracking
+            camera.lookAt(carGroup.position.clone().add(new THREE.Vector3(0, 1, 0)));
+
+            // Update UI
+            speedDisplay.innerText = Math.round(Math.abs(speed) * 100);
+
+            renderer.render(scene, camera);
+        }
+
+        // Window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
